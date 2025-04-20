@@ -1,0 +1,2 @@
+# cloudformation-laravel-infra-sample
+Laravelでの開発環境の構成例をCloudFormationを利用して作成したサンプル
