@@ -1,4 +1,4 @@
-# CloudFormation Laravel WebApp Infrastructure Example(V1.0)
+# CloudFormation Laravel WebApp Infrastructure Example
 
 このリポジトリは、AWS CloudFormation によって構築されるWeb開発用インフラテンプレートです。
 セキュリティを重視し、SSH秘密鍵はCloudFormationで一切保持せず、**各自の公開鍵を渡して構築**します。
@@ -6,9 +6,10 @@
 ---
 
 ## 📐 構成概要
+![](./network_configuration_diagram.png)
 
-- Lamp環境構築(PHP、Laravel、Mysql)
-- RDSはMySQLを使用し、マスターとリードレプリカを構成
+- Lamp環境構築(Linux、Apache、Mysql、PHP+Laravel)
+- RDSはMySQLを使用し、マスター、リードレプリカを構成
 - VPC（2AZ構成）
 - PublicサブネットA: Bridgeサーバ（踏み台）
 - PublicサブネットB: NAT Gateway配置用
@@ -84,32 +85,46 @@
 ![](./step4.png)
 ```bash
 特に変更点はないため『送信』ボタンを押下しスタックを作成して下さい。
-
 作成には15～30分程度掛かります。
+```
+
+**Step5　チェックすること**
+![](./step5.png)
+
+```bash
 対象スタックのステータスが『CREATE_COMPLETE』になれば完了です。
 ```
 
+![](./output.png)
+
+作成完了後、対象スタックの『出力』タグに以下の情報が表示されます。
+
+|ALBDNSName|ブラウザからWebサーバにアクセスするためのエンドポイント|
+|BridgePublicIP|WebServerBridgeサーバのパブリックIP|
+
 ---
 
-## 💻 ローカルマシンからのSSH接続方法について
+## 💻 ローカルマシンからの接続方法について
 
 ローカルマシンの種類(Mac、Windows)により色々な接続方法がありますが、ここでは以下を想定してご説明致します。
-なお、キーペアはpemを利用することをお勧めします。
+キーペアはpemを利用することをお勧めします。
+なお、WebServerBridgeの接続IPは『BridgePublicIP』となります。
 
 - Windows → Git Bash
 - Mac → ターミナル
 
+
 ### Step1 ~/.ssh/configファイルの修正 (なければ新規作成)
 .ssh/configファイルを編集し、以下の項目を変更して下さい。
 
-|bridgeServer|HostName|『EC2』の対象インスタンスのパブリックIPとなります。|
+|bridgeServer|HostName|対象スタックの『出力』に表示されていた『BridgePublicIP』|
 |bridgeServer|IdentityFile|ローカルに保存したキーペアファイルのフルパス|
 |develop|IdentityFile|ローカルに保存したキーペアファイルのフルパス|
 |staging|IdentityFile|ローカルに保存したキーペアファイルのフルパス|
 
 
 ```bash
-HOST bridgeServer
+HOST bridge
   HostName <WebServerBridgeのパブリックIP>
   User ec2-user
   IdentityFile <ローカルに保存したキーペアファイルのフルパス>
@@ -134,7 +149,7 @@ Host staging
 
 ### Bridgeサーバに接続
 ```bash
-ssh bridgeServer
+ssh bridge
 ```
 ### developサーバに接続
 ```bash
@@ -146,17 +161,35 @@ ssh staging
 ```
 ---
 
+## mysqlサーバに接続する方法
+各サーバにアクセスし、mysqlコマンドを実行して下さい。
+
+**接続例**
+```bash
+> mysql -u admin -p -h <RDSエンドポイント> demo_db
+```
+---
+
+
 ## ✅ サンプルWebページ表示方法
 
-Cloud Formationの対象スタックを選択し、『出力』タグに表示されている『ALBDNSName』をコピーし、末尾に『/dev/』『/stg/』を付与してブラウザでアクセスして下さい。
+URLはCloud Formationの『出力』に表示されている『ALBDNSName』＋『/dev/』 or 『/stg/』となります。
+ブラウザに貼り付けてご確認下さい。
 LaravelのWelcomeページが表示されれば成功です。
 
 ---
 
+## ✅ 環境を削除する方法
+
+Cloud Formationより対象スタックを選択し、『削除』ボタンを押下して下さい。
+今回自動構築に利用した全インスタンスが削除されます。
+
+---
 
 ## 📌 注意事項
 
 - 本テンプレートは **開発・検証用の構成**です。
+- リポジトリ内に置かれている設定ファイルはプロジェクト管理用です。そちらを変更してもインフラには反映されません。(本体はS3に配置)
 - 本番環境では、IAM Role、SSM Session Manager、Secrets Manager など高セキュアな併用を推奨します。
 - SSH秘密鍵は **絶対に公開しないでください**。
 - 本リポジトリのコードやテンプレートを利用したことによる直接的・間接的な損害について、作成者は一切の責任を負いません。利用は自己責任でお願いいたします。
