@@ -1,77 +1,191 @@
-# CloudFormation Laravel WebApp Infrastructure Example
+# CloudFormation Laravel WebApp Infrastructure Example(V1.0)
 
-このリポジトリは、AWS CloudFormation によって構築される Laravel 用のWeb開発インフラテンプレートです。
+このリポジトリは、AWS CloudFormation によって構築されるWeb開発用インフラテンプレートです。
 セキュリティを重視し、SSH秘密鍵はCloudFormationで一切保持せず、**各自の公開鍵を渡して構築**します。
 
 ---
 
 ## 📐 構成概要
 
-- VPC（単一AZ構成）
-- Publicサブネット: Bridgeサーバ（踏み台）
-- Privateサブネット: Webサーバ（Develop・Dev）、RDS（マスター・リードレプリカ）
-- NAT Gateway、Route Table、セキュリティグループ自動構成
-- SSH接続用の公開鍵はパラメータ入力で指定（秘密鍵は自前）
+- Lamp環境構築(PHP、Laravel、Mysql)
+- RDSはMySQLを使用し、マスターとリードレプリカを構成
+- VPC（2AZ構成）
+- PublicサブネットA: Bridgeサーバ（踏み台）
+- PublicサブネットB: NAT Gateway配置用
+- PrivateサブネットA/B: Webサーバ（Develop・Staging）、RDS（マスター・リードレプリカ）配置
+- ALB（Application Load Balancer）を構築し、/dev/*, /stg/* でパス振り分け
+- NAT Gateway、Internet Gateway、Route Table、セキュリティグループ
+- SSH接続用のキーペアはパラメータ（KeyName）からCloud Formation実行時パラメータとして指定（秘密鍵は自前で管理）
+- 一部設定ファイルはS3バケットより取得(S3+IAM連携で高セキュリティ対応)
 
 ---
 
-## 🔐 SSH鍵の生成と指定方法
+## 🔐 キーペアの生成と接続方法
 
-### ✅ Mac / Linux の場合
+### はじめに
+- あらかじめEC2より利用するキーペアの生成をお願いします。(pem推奨)
+- CloudFormation実行後ローカルマシンにてWebServerBridgeのパブリックIPの設定をお願いします。
+- Macの場合はターミナル、Windowsの場合はGitBashなどをご利用下さい。
 
+
+## 🚀 Cloud Formation 実行方法
+
+**AWSコンソール画面よりCloud Formation → スタックの作成**
+![](./start_image.png)
 ```bash
-ssh-keygen -t rsa -b 2048 -f DemoKeyPair
-```
-
-- `DemoKeyPair`（秘密鍵）と `DemoKeyPair.pub`（公開鍵）が作成されます。
-- CloudFormation 実行時、`.pub` の内容を `SSHAuthorizedKey` パラメータに渡します。
-
----
-
-### ✅ Windows（PuTTY使用）の場合
-
-1. **PuTTYgen** を起動（未インストールの場合は PuTTY セットをダウンロード）
-2. 「Generate」をクリックしてキーを生成
-3. 「**Public key for pasting into OpenSSH authorized_keys file**」 の内容をコピー
-4. 「Save private key」で `.ppk` ファイルとして保存（秘密鍵）
-5. コピーした公開鍵を `SSHAuthorizedKey` に貼り付けて CloudFormation を実行
-
----
-
-## 🚀 CloudFormation 実行方法（例: AWS CLI）
-
-```bash
-aws cloudformation create-stack --stack-name LaravelInfraStack --template-body file://cloudformation-laravel-webapp-infra-example.yml　--parameters ParameterKey=SSHAuthorizedKey,ParameterValue="$(cat DemoKeyPair.pub)"
-```
-
-※ Windowsユーザーは公開鍵文字列をコピペで貼り付けてください。
-
----
-
-## 💻 SSH接続例
-
-### Bridgeサーバに接続（グローバルIPで）
-
-```bash
-ssh -i DemoKeyPair.pem ec2-user@<BridgeのパブリックIP>
-```
-
-> ※ `.pem` ファイル形式で保存している場合は拡張子も指定してください  
-> `.ppk` は PuTTY 用、CLI では使えません。
-
----
-
-### Bridgeから内部のWebサーバへ接続
-
-```bash
-ssh -i ~/DemoKeyPair.pem ec2-user@10.0.200.xxx
+『スタックの作成』ボタンを押下
 ```
 
 ---
+
+**Step１　スタックの作成**
+![](./step1.png)
+
+|テンプレートの準備|『既存のテンプレート』を選択|
+|テンプレートの指定|『テンプレートファイルのアップロード』を選択|
+|ファイルの選択|本リポジトリより『cloudformation-dev-laravel-infra-example.yml』を選択|
+
+```bash
+エラーがなければ『次へ』ボタンを押下して下さい。
+```
+
+---
+
+**Step２　スタックの詳細を指定**
+![](./step2.png)
+
+
+|スタック名|適当に|
+|KeyName|利用するキーペア名。事前に作成しておいて下さい。|
+|RDSDBName|スキーマ名。デフォルトは『demo_db』|
+|RDSMasterUserPassword|DBパスワード。デフォルトは『testpass』|
+|RDSMasterUsername|DBユーザ名。デフォルトは『admin』|
+
+```bash
+詳細を入力し、『次へ』ボタンを押下して下さい。
+
+※ パラメータを変更した場合、利用時にLamp環境の設定を変える必要があります。
+```
+
+---
+
+**Step３　スタックオプションの設定**
+![](./step3.png)
+
+```bash
+本テンプレートはCloud Formation実行時にS3を利用するため 
+『AWS CloudFormation によって IAM リソースが作成される場合があることを承認します。』
+にチェックを入れ『次へ』ボタンを押下して下さい。
+```
+
+---
+
+**Step４　確認して作成**
+![](./step4.png)
+```bash
+特に変更点はないため『送信』ボタンを押下しスタックを作成して下さい。
+
+作成には15～30分程度掛かります。
+対象スタックのステータスが『CREATE_COMPLETE』になれば完了です。
+```
+
+---
+
+## 💻 ローカルマシンからのSSH接続方法について
+
+ローカルマシンの種類(Mac、Windows)により色々な接続方法がありますが、ここでは以下を想定してご説明致します。
+なお、キーペアはpemを利用することをお勧めします。
+
+- Windows → Git Bash
+- Mac → ターミナル
+
+### Step1 ~/.ssh/configファイルの修正 (なければ新規作成)
+.ssh/configファイルを編集し、以下の項目を変更して下さい。
+
+|bridgeServer|HostName|『EC2』の対象インスタンスのパブリックIPとなります。|
+|bridgeServer|IdentityFile|ローカルに保存したキーペアファイルのフルパス|
+|develop|IdentityFile|ローカルに保存したキーペアファイルのフルパス|
+|staging|IdentityFile|ローカルに保存したキーペアファイルのフルパス|
+
+
+```bash
+HOST bridgeServer
+  HostName <WebServerBridgeのパブリックIP>
+  User ec2-user
+  IdentityFile <ローカルに保存したキーペアファイルのフルパス>
+  ForwardAgent yes
+
+Host develop
+  HostName 10.0.200.10
+  User ec2-user
+  IdentityFile <ローカルに保存したキーペアファイルのフルパス>
+  ProxyJump bridgeServer
+
+Host staging
+  HostName 10.0.201.10
+  User ec2-user
+  IdentityFile <ローカルに保存したキーペアファイルのフルパス>
+  ProxyJump bridgeServer
+```
+
+
+
+**その後以下のコマンドを実行することで対象のサーバに接続出来るようになります。**
+
+### Bridgeサーバに接続
+```bash
+ssh bridgeServer
+```
+### developサーバに接続
+```bash
+ssh develop
+```
+### stagingサーバに接続
+```bash
+ssh staging
+```
+---
+
+## ✅ サンプルWebページ表示方法
+
+Cloud Formationの対象スタックを選択し、『出力』タグに表示されている『ALBDNSName』をコピーし、末尾に『/dev/』『/stg/』を付与してブラウザでアクセスして下さい。
+LaravelのWelcomeページが表示されれば成功です。
+
+---
+
 
 ## 📌 注意事項
 
 - 本テンプレートは **開発・検証用の構成**です。
-- 本番環境では、IAM Role、SSM Session Manager、Secrets Manager などの併用を推奨します。
-- SSH秘密鍵（.pemや.ppk）は **絶対にGitHubなどに公開しないでください**。
+- 本番環境では、IAM Role、SSM Session Manager、Secrets Manager など高セキュアな併用を推奨します。
+- SSH秘密鍵は **絶対に公開しないでください**。
 - 本リポジトリのコードやテンプレートを利用したことによる直接的・間接的な損害について、作成者は一切の責任を負いません。利用は自己責任でお願いいたします。
+
+---
+
+## ✍ 補足　Laravel .envファイルの修正 
+
+**サンプルを確認するのが目的ならRDSを利用していないためこの対応が不要です**
+
+対応する場合はdevelop、stagingサーバへ接続し、.envファイル内のLaravelのRDSエンドポイントを更新して下さい。
+
+**対象ファイル**
+　/var/www/html/laravel-app/.env
+
+**対応方法**
+- 『DB_HOST_WRITE』を検索し、demo-db-instanceのエンドポイントに書き換え
+- 『DB_HOST_READ』を検索し、demo-db-read-instanceのエンドポイントに書き換え
+
+### メモ
+※自動化も可能だがさすがに初回起動のみでオーバースペックなので一旦保留(気が向いたら実装)
+
+やり方としては、EventBridgeでCloud Formation起動完了イベントを検知し、取得したRDSエンドポイントを.envファイルに更新する。この辺りはLambda
+
+### Laravel セッションテーブル対応
+以下を実行
+```bash
+php /var/www/html/laravel-app/artisan migrate
+php /var/www/html/laravel-app/artisan route:clear
+php /var/www/html/laravel-app/artisan cache:clear
+sudo systemctl restart httpd
+```

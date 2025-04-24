@@ -1,0 +1,583 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation Laravel WebApp Infrastructure Example (Fully Defined)
+
+Parameters:
+  RDSMasterUsername:
+    Type: String
+    Description: The database admin account name
+    Default: admin
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: '^[a-zA-Z0-9]*$'
+
+  RDSMasterUserPassword:
+    Type: String
+    Description: The database admin account password
+    Default: testpass
+    MinLength: 4
+    AllowedPattern: "^[a-zA-Z0-9-!\\_]*$"
+    NoEcho: true
+
+  RDSDBName:
+    Type: String
+    Description: The database name
+    Default: demo_db
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: '^[a-zA-Z0-9_]*$'
+
+  KeyName:
+    Type: String
+    Description: The Key Name
+
+Resources:
+  S3AccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3ConfigRead
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - arn:aws:s3:::cloudformation-laravel-infra-sample
+                  - arn:aws:s3:::cloudformation-laravel-infra-sample/*
+
+  S3InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref S3AccessRole
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: demo-vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: demo-igw
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.100.0/24
+      AvailabilityZone: ap-northeast-1a
+      Tags:
+        - Key: Name
+          Value: demo-subnet-public-a
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.101.0/24
+      AvailabilityZone: ap-northeast-1c
+      Tags:
+        - Key: Name
+          Value: demo-subnet-public-b
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.200.0/24
+      AvailabilityZone: ap-northeast-1a
+      Tags:
+        - Key: Name
+          Value: demo-subnet-private-a
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.201.0/24
+      AvailabilityZone: ap-northeast-1c
+      Tags:
+        - Key: Name
+          Value: demo-subnet-private-b
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: demo-public-route-table
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  NATGatewayEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: demo-nat-gateway-eip
+
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnetA
+      Tags:
+        - Key: Name
+          Value: demo-nat-gateway
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: demo-private-route-table
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+
+  PrivateSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRouteTable
+
+  MyEC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: demo-ec2-security-group
+
+  MyRDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow RDS access from EC2
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref MyEC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: demo-rds-security-group
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: RDS Subnet Group
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+      Tags:
+        - Key: Name
+          Value: demo-db-subnet-group
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: demo-alb-security-group
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: demo-alb
+      Subnets:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Scheme: internet-facing
+      Type: application
+      Tags:
+        - Key: Name
+          Value: demo-alb
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: demo-alb-tg
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref VPC
+      TargetType: instance
+      HealthCheckPath: /
+      Matcher:
+        HttpCode: 200
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: '404'
+            ContentType: text/html
+            MessageBody: "<h1>404 Not Found</h1><p>The page you're looking for does not exist.</p>"
+
+  ALBTargetGroupDevelop:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VPC
+      Port: 80
+      Protocol: HTTP
+      TargetType: instance
+      Targets:
+        - Id: !Ref WebServerDevelop
+          Port: 80
+      HealthCheckPath: /health
+      Matcher:
+        HttpCode: 200
+
+  ALBTargetGroupStaging:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VPC
+      Port: 80
+      Protocol: HTTP
+      TargetType: instance
+      Targets:
+        - Id: !Ref WebServerStaging
+          Port: 80
+      HealthCheckPath: /health
+      Matcher:
+        HttpCode: 200
+
+  ALBListenerRuleStaging:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ALBListener
+      Priority: 10
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - "/stg"
+            - "/stg/"
+            - "/stg/*"
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroupStaging
+
+  ALBListenerRuleDevelop:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ALBListener
+      Priority: 20
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - "/dev"
+            - "/dev/"
+            - "/dev/*"
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroupDevelop
+
+  WebServerBridge:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-012261b9035f8f938
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: 0
+          SubnetId: !Ref PublicSubnetA
+          GroupSet:
+            - !Ref MyEC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: WebServerBridge
+
+  WebServerBridgeEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: demo-webserver-bridge-eip
+
+  WebServerBridgeEIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt WebServerBridgeEIP.AllocationId
+      InstanceId: !Ref WebServerBridge
+
+  WebServerDevelop:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-012261b9035f8f938
+      InstanceType: t2.micro
+      SubnetId: !Ref PrivateSubnetA
+      PrivateIpAddress: 10.0.200.10
+      KeyName: !Ref KeyName
+      SecurityGroupIds:
+        - !Ref MyEC2SecurityGroup
+      IamInstanceProfile: !Ref S3InstanceProfile
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          exec > >(tee /var/log/userdata.log|logger -t userdata -s 2>/dev/console) 2>&1
+          set -euxo pipefail
+
+          # 開発サーバデフォルト設定
+          timedatectl set-timezone Asia/Tokyo
+          setenforce 0
+
+          # apache
+          dnf install -y httpd
+          aws s3 cp s3://cloudformation-laravel-infra-sample/httpd.conf /etc/httpd/conf/httpd.conf
+          chown apache:apache /etc/httpd/conf/httpd.conf
+          chmod 644 /etc/httpd/conf/httpd.conf
+
+          # php
+          dnf install -y php php-mbstring php-pdo php-mysqlnd
+
+          # MySQL
+          dnf install -y dnf-plugins-core
+          dnf install -y https://dev.mysql.com/get/mysql80-community-release-el9-1.noarch.rpm
+          dnf config-manager --enable mysql80-community
+          rpm --import https://repo.mysql.com/RPM-GPG-KEY-mysql-2023
+          dnf clean all
+          dnf makecache
+          dnf install -y mysql-community-client
+
+          #composer
+          cd /root
+          export HOME=/root
+          curl -sS https://getcomposer.org/installer | php
+          mv composer.phar /usr/local/bin/composer
+          chmod +x /usr/local/bin/composer
+
+          # Laravel
+          mkdir -p /var/www/html
+          cd /var/www/html
+          COMPOSER_MEMORY_LIMIT=-1 composer create-project laravel/laravel laravel-app
+          chown -R apache:apache /var/www/html/laravel-app /var/www/html/laravel-app/storage /var/www/html/laravel-app/bootstrap/cache
+          chmod -R 775 /var/www/html/laravel-app/storage /var/www/html/laravel-app/bootstrap/cache
+          aws s3 cp s3://cloudformation-laravel-infra-sample/.env /var/www/html/laravel-app/.env
+          aws s3 cp s3://cloudformation-laravel-infra-sample/web.php /var/www/html/laravel-app/routes/web.php
+          aws s3 cp s3://cloudformation-laravel-infra-sample/database.php /var/www/html/laravel-app/config/database.php
+          chown apache:apache /var/www/html/laravel-app/.env /var/www/html/laravel-app/routes/web.php /var/www/html/laravel-app/config/database.php
+          chmod 644 /var/www/html/laravel-app/.env /var/www/html/laravel-app/routes/web.php /var/www/html/laravel-app/config/database.php
+          mkdir -p /var/www/html/laravel-app/storage/logs
+          touch /var/www/html/laravel-app/storage/logs/laravel.log
+          chown apache:apache /var/www/html/laravel-app/storage/logs/laravel.log
+          chmod 664 /var/www/html/laravel-app/storage/logs/laravel.log
+          chown -R apache:apache /var/www/html/laravel-app/storage
+          chmod -R 775 /var/www/html/laravel-app/storage
+          cd /var/www/html/laravel-app
+          php artisan key:generate
+          php artisan config:clear
+          php artisan route:clear
+          php artisan view:clear
+
+          #DB設定がないと落ちるのでコメント
+          #php artisan cache:table
+          #php artisan session:table
+          #php artisan migrate
+          #php artisan cache:clear
+
+          systemctl enable httpd
+          systemctl start httpd
+      Tags:
+        - Key: Name
+          Value: demo-webserver-develop
+
+  WebServerStaging:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-012261b9035f8f938
+      InstanceType: t2.micro
+      SubnetId: !Ref PrivateSubnetB
+      PrivateIpAddress: 10.0.201.10
+      KeyName: !Ref KeyName
+      SecurityGroupIds:
+        - !Ref MyEC2SecurityGroup
+      IamInstanceProfile: !Ref S3InstanceProfile
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          exec > >(tee /var/log/userdata.log|logger -t userdata -s 2>/dev/console) 2>&1
+          set -euxo pipefail
+
+          # 開発サーバデフォルト設定
+          timedatectl set-timezone Asia/Tokyo
+          setenforce 0
+
+          # apache
+          dnf install -y httpd
+          aws s3 cp s3://cloudformation-laravel-infra-sample/httpd.conf /etc/httpd/conf/httpd.conf
+          chown apache:apache /etc/httpd/conf/httpd.conf
+          chmod 644 /etc/httpd/conf/httpd.conf
+
+          # php
+          dnf install -y php php-mbstring php-pdo php-mysqlnd
+
+          # MySQL
+          dnf install -y dnf-plugins-core
+          dnf install -y https://dev.mysql.com/get/mysql80-community-release-el9-1.noarch.rpm
+          dnf config-manager --enable mysql80-community
+          rpm --import https://repo.mysql.com/RPM-GPG-KEY-mysql-2023
+          dnf clean all
+          dnf makecache
+          dnf install -y mysql-community-client
+
+          #composer
+          cd /root
+          export HOME=/root
+          curl -sS https://getcomposer.org/installer | php
+          mv composer.phar /usr/local/bin/composer
+          chmod +x /usr/local/bin/composer
+
+          # Laravel
+          mkdir -p /var/www/html
+          cd /var/www/html
+          COMPOSER_MEMORY_LIMIT=-1 composer create-project laravel/laravel laravel-app
+          chown -R apache:apache /var/www/html/laravel-app /var/www/html/laravel-app/storage /var/www/html/laravel-app/bootstrap/cache
+          chmod -R 775 /var/www/html/laravel-app/storage /var/www/html/laravel-app/bootstrap/cache
+          aws s3 cp s3://cloudformation-laravel-infra-sample/.env /var/www/html/laravel-app/.env
+          aws s3 cp s3://cloudformation-laravel-infra-sample/web.php /var/www/html/laravel-app/routes/web.php
+          aws s3 cp s3://cloudformation-laravel-infra-sample/database.php /var/www/html/laravel-app/config/database.php
+          chown apache:apache /var/www/html/laravel-app/.env /var/www/html/laravel-app/routes/web.php /var/www/html/laravel-app/config/database.php
+          chmod 644 /var/www/html/laravel-app/.env /var/www/html/laravel-app/routes/web.php /var/www/html/laravel-app/config/database.php
+          mkdir -p /var/www/html/laravel-app/storage/logs
+          touch /var/www/html/laravel-app/storage/logs/laravel.log
+          chown apache:apache /var/www/html/laravel-app/storage/logs/laravel.log
+          chmod 664 /var/www/html/laravel-app/storage/logs/laravel.log
+          chown -R apache:apache /var/www/html/laravel-app/storage
+          chmod -R 775 /var/www/html/laravel-app/storage
+          cd /var/www/html/laravel-app
+          php artisan key:generate
+          php artisan config:clear
+          php artisan route:clear
+          php artisan view:clear
+
+          #DB設定がないと落ちるのでコメント
+          #php artisan cache:table
+          #php artisan session:table
+          #php artisan migrate
+          #php artisan cache:clear
+
+          systemctl enable httpd
+          systemctl start httpd
+      Tags:
+        - Key: Name
+          Value: demo-webserver-staging
+
+  MyRDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: 20
+      DBInstanceClass: db.t3.micro
+      DBInstanceIdentifier: demo-db-instance
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      Engine: mysql
+      MasterUsername: !Ref RDSMasterUsername
+      MasterUserPassword: !Ref RDSMasterUserPassword
+      DBName: !Ref RDSDBName
+      StorageType: gp3
+      MultiAZ: false
+      VPCSecurityGroups:
+        - !Ref MyRDSSecurityGroup
+      Tags:
+        - Key: Name
+          Value: demo-rds
+
+  MyRDSReadReplicaInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceClass: db.t3.micro
+      DBInstanceIdentifier: demo-db-read-instance
+      SourceDBInstanceIdentifier: !Ref MyRDSInstance
+      Engine: mysql
+      StorageType: gp3
+      MultiAZ: false
+      VPCSecurityGroups:
+        - !Ref MyRDSSecurityGroup
+      Tags:
+        - Key: Name
+          Value: demo-rds-read-replica
+
+Outputs:
+  ALBDNSName:
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+    Description: Public DNS of the Application Load Balancer
+
+  BridgePublicIP:
+    Value: !GetAtt WebServerBridge.PublicIp
+    Description: Public IP of the bridge server
