@@ -42,6 +42,8 @@
 **Step１　スタックの作成**
 ![](./step1.png)
 
+| 項目| 対応方法|
+|---|---|
 |テンプレートの準備|『既存のテンプレート』を選択|
 |テンプレートの指定|『テンプレートファイルのアップロード』を選択|
 |ファイルの選択|本リポジトリより『cloudformation-dev-laravel-infra-example.yml』を選択|
@@ -56,6 +58,8 @@
 ![](./step2.png)
 
 
+|項目名|説明|
+|---|---|
 |スタック名|適当に|
 |KeyName|利用するキーペア名。事前に作成しておいて下さい。|
 |RDSDBName|スキーマ名。デフォルトは『demo_db』|
@@ -99,6 +103,8 @@
 
 作成完了後、対象スタックの『出力』タグに以下の情報が表示されます。
 
+| 項目名 | 説明 |
+|---|---|
 |ALBDNSName|ブラウザからWebサーバにアクセスするためのエンドポイント|
 |BridgePublicIP|WebServerBridgeサーバのパブリックIP|
 
@@ -113,15 +119,15 @@
 - Windows → Git Bash
 - Mac → ターミナル
 
-
 ### Step1 ~/.ssh/configファイルの修正 (なければ新規作成)
 .ssh/configファイルを編集し、以下の項目を変更して下さい。
 
-|bridgeServer|HostName|対象スタックの『出力』に表示されていた『BridgePublicIP』|
-|bridgeServer|IdentityFile|ローカルに保存したキーペアファイルのフルパス|
-|develop|IdentityFile|ローカルに保存したキーペアファイルのフルパス|
-|staging|IdentityFile|ローカルに保存したキーペアファイルのフルパス|
-
+| サーバ名 | キー | 設定値 |
+|---|---|---|
+| bridge| HostName | 対象スタックの『出力』に表示されていた『BridgePublicIP』 |
+| bridge| IdentityFile| ローカルに保存したキーペアファイルのフルパス |
+| develop | IdentityFile| ローカルに保存したキーペアファイルのフルパス |
+| staging | IdentityFile| ローカルに保存したキーペアファイルのフルパス |
 
 ```bash
 HOST bridge
@@ -142,8 +148,6 @@ Host staging
   IdentityFile <ローカルに保存したキーペアファイルのフルパス>
   ProxyJump bridgeServer
 ```
-
-
 
 **その後以下のコマンドを実行することで対象のサーバに接続出来るようになります。**
 
