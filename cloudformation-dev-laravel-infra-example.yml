@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: CloudFormation Laravel WebApp Infrastructure Example (Fully Defined)
+Description: CloudFormation Laravel WebApp Infrastructure Example with CloudWatch Alerts
 
 Parameters:
   RDSMasterUsername:
@@ -30,7 +30,118 @@ Parameters:
     Type: String
     Description: The Key Name
 
+  NotificationEmail:
+    Type: String
+    Description: Email address to receive CloudWatch alerts
+    AllowedPattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+    ConstraintDescription: Must be a valid email address
+
 Resources:
+  # CloudWatch Logsのロググループ
+  WebServerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/ec2/laravel-webserver
+      RetentionInDays: 30
+      Tags:
+        - Key: Name
+          Value: demo-webserver-log-group
+
+  # SNSトピック
+  NotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: LaravelInfraAlerts
+      DisplayName: Laravel Infrastructure Alerts
+      Tags:
+        - Key: Name
+          Value: demo-sns-topic
+
+  # SNSサブスクリプション
+  NotificationSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: email
+      TopicArn: !Ref NotificationTopic
+      Endpoint: !Ref NotificationEmail
+
+  # EC2 CPU使用率アラーム
+  EC2CPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: WebServerDevelopHighCPU
+      AlarmDescription: Alarm when CPU usage exceeds 70% for WebServerDevelop
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref WebServerDevelop
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 70
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref NotificationTopic
+      OKActions: # 復旧時の通知を追加（オプション）
+        - !Ref NotificationTopic
+      TreatMissingData: notBreaching
+      Tags:
+        - Key: Name
+          Value: demo-ec2-cpu-alarm
+
+  # RDSデータベース接続数アラーム
+  RDSDatabaseConnectionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: RDSHighDatabaseConnections
+      AlarmDescription: Alarm when database connections exceed 20 for RDS instance
+      Namespace: AWS/RDS
+      MetricName: DatabaseConnections
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref MyRDSInstance
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 20
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref NotificationTopic
+      OKActions: # 復旧時の通知を追加（オプション）
+        - !Ref NotificationTopic
+      TreatMissingData: notBreaching
+      Tags:
+        - Key: Name
+          Value: demo-rds-connections-alarm
+
+  # ディスク使用率アラーム
+  DiskUsageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: WebServerDevelopHighDiskUsage
+      AlarmDescription: Alarm when disk usage exceeds 80% for WebServerDevelop
+      Namespace: Custom/LaravelWebServer
+      MetricName: used_percent
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref WebServerDevelop
+        - Name: path
+          Value: /
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref NotificationTopic
+      OKActions: # 復旧時の通知を追加（オプション）
+        - !Ref NotificationTopic
+      TreatMissingData: notBreaching
+      Tags:
+        - Key: Name
+          Value: demo-disk-usage-alarm
+
   S3AccessRole:
     Type: AWS::IAM::Role
     Properties:
@@ -53,6 +164,26 @@ Resources:
                 Resource:
                   - arn:aws:s3:::cloudformation-laravel-infra-sample
                   - arn:aws:s3:::cloudformation-laravel-infra-sample/*
+        - PolicyName: CloudWatchLogsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/ec2/laravel-webserver:*
+        # 修正: カスタムメトリクス送信のための権限を追加
+        - PolicyName: CloudWatchPutMetric
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: "*"
 
   S3InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -452,6 +583,67 @@ Resources:
           #php artisan migrate
           #php artisan cache:clear
 
+          # CloudWatch Agentのインストール
+          dnf install -y amazon-cloudwatch-agent
+
+          # CloudWatch Agentの設定ファイル
+          cat << 'EOF' > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+          {
+            "agent": {
+              "metrics_collection_interval": 60,
+              "run_as_user": "root"
+            },
+            "metrics": {
+              "namespace": "Custom/LaravelWebServer",
+              "metrics_collected": {
+                "disk": {
+                  "measurement": [
+                    {"name": "used_percent", "unit": "Percent"}
+                  ],
+                  "resources": ["/"],
+                  "ignore_file_system_types": ["sysfs", "devtmpfs"]
+                },
+                "mem": {
+                  "measurement": [
+                    {"name": "mem_used_percent", "unit": "Percent"}
+                  ]
+                }
+              }
+            },
+            "logs": {
+              "logs_collected": {
+                "files": {
+                  "collect_list": [
+                    {
+                      "file_path": "/var/www/html/laravel-app/storage/logs/laravel.log",
+                      "log_group_name": "/aws/ec2/laravel-webserver",
+                      "log_stream_name": "{instance_id}-laravel",
+                      "auto_removal": true
+                    },
+                    {
+                      "file_path": "/var/log/httpd/access_log",
+                      "log_group_name": "/aws/ec2/laravel-webserver",
+                      "log_stream_name": "{instance_id}-httpd-access",
+                      "auto_removal": true
+                    },
+                    {
+                      "file_path": "/var/log/httpd/error_log",
+                      "log_group_name": "/aws/ec2/laravel-webserver",
+                      "log_stream_name": "{instance_id}-httpd-error",
+                      "auto_removal": true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+          EOF
+
+          # CloudWatch Agentの起動
+          /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+          systemctl enable amazon-cloudwatch-agent
+          systemctl start amazon-cloudwatch-agent
+
           systemctl enable httpd
           systemctl start httpd
       Tags:
@@ -533,6 +725,67 @@ Resources:
           #php artisan migrate
           #php artisan cache:clear
 
+          # CloudWatch Agentのインストール
+          dnf install -y amazon-cloudwatch-agent
+
+          # CloudWatch Agentの設定ファイル（カスタムメトリクスを追加）
+          cat << 'EOF' > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+          {
+            "agent": {
+              "metrics_collection_interval": 60,
+              "run_as_user": "root"
+            },
+            "metrics": {
+              "namespace": "Custom/LaravelWebServer",
+              "metrics_collected": {
+                "disk": {
+                  "measurement": [
+                    {"name": "used_percent", "unit": "Percent"}
+                  ],
+                  "resources": ["/"],
+                  "ignore_file_system_types": ["sysfs", "devtmpfs"]
+                },
+                "mem": {
+                  "measurement": [
+                    {"name": "mem_used_percent", "unit": "Percent"}
+                  ]
+                }
+              }
+            },
+            "logs": {
+              "logs_collected": {
+                "files": {
+                  "collect_list": [
+                    {
+                      "file_path": "/var/www/html/laravel-app/storage/logs/laravel.log",
+                      "log_group_name": "/aws/ec2/laravel-webserver",
+                      "log_stream_name": "{instance_id}-laravel",
+                      "auto_removal": true
+                    },
+                    {
+                      "file_path": "/var/log/httpd/access_log",
+                      "log_group_name": "/aws/ec2/laravel-webserver",
+                      "log_stream_name": "{instance_id}-httpd-access",
+                      "auto_removal": true
+                    },
+                    {
+                      "file_path": "/var/log/httpd/error_log",
+                      "log_group_name": "/aws/ec2/laravel-webserver",
+                      "log_stream_name": "{instance_id}-httpd-error",
+                      "auto_removal": true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+          EOF
+
+          # CloudWatch Agentの起動
+          /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+          systemctl enable amazon-cloudwatch-agent
+          systemctl start amazon-cloudwatch-agent
+
           systemctl enable httpd
           systemctl start httpd
       Tags:
@@ -581,3 +834,7 @@ Outputs:
   BridgePublicIP:
     Value: !GetAtt WebServerBridge.PublicIp
     Description: Public IP of the bridge server
+
+  NotificationTopicArn:
+    Value: !Ref NotificationTopic
+    Description: ARN of the SNS topic for CloudWatch alerts
